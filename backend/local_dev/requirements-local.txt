@@ -1,0 +1,10 @@
+# 本地联调所需的依赖 (远小于生产 requirements.txt: 不装 torch/influxdb/asyncpg)
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+aiosqlite
+paho-mqtt
+pydantic-settings
+numpy
+python-multipart
+websockets

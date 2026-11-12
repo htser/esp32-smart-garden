@@ -1,0 +1,34 @@
+# ---------- Flutter / Dart ----------
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+mobile-app/android/.gradle/
+mobile-app/android/local.properties
+
+# ---------- Python ----------
+.venv/
+__pycache__/
+*.py[cod]
+*.db
+*.db-journal
+backend/data/
+backend/.env
+
+# ---------- 嵌入式 ----------
+firmware/**/build/
+firmware/**/.pio/
+*.bin.tmp
+
+# ---------- 系统 ----------
+.DS_Store
+._*
+Thumbs.db
+
+# 签名密钥
+android-signing/

@@ -1,0 +1,48 @@
+name: zhigu_app
+description: 智菇小站 AI智能家庭小菜园移动端
+publish_to: 'none'
+version: 1.0.1+2
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 网络与状态
+  dio: ^5.4.0
+  provider: ^6.1.1
+  # WebSocket 实时推送
+  web_socket_channel: ^2.4.0
+  # 本地存储
+  shared_preferences: ^2.2.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  # 图表
+  fl_chart: ^0.66.0
+  # 图片
+  cached_network_image: ^3.3.1
+  image_picker: ^1.0.7
+  # UI
+  flutter_svg: ^2.0.9
+  pull_to_refresh: ^2.0.0
+  # 路由
+  go_router: ^13.0.0
+  # 下面三个当前代码没用到，先注释掉，避免 CI 里还要配 google-services.json / 蓝牙权限：
+  # 蓝牙配网 (ESP32 配网)
+  # flutter_blue_plus: ^1.32.0
+  # 推送
+  # firebase_messaging: ^14.7.10
+  # firebase_core: ^2.24.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  hive_generator: ^2.0.1
+  build_runner: ^2.4.8
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/

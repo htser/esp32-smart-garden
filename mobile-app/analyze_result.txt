@@ -1,0 +1,2 @@
+api_service.dart:17:13  info  todo  TODO: 从本地存储注入 JWT
+chronic_assessment_screen.dart:235:20  info  deprecated_member_use  'activeColor' is deprecated and shouldn't be used. Use activeThumbColor instead. This feature was deprecated after v3.31.0-2.0.pre.

@@ -1,0 +1,166 @@
+name: Build Flutter (Android + iOS)
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'mobile-app/**'
+      - '.github/workflows/flutter-apk.yml'
+  workflow_dispatch:
+
+env:
+  API_BASE: http://39.105.145.255:18000
+  WS_BASE: ws://39.105.145.255:18000
+
+jobs:
+  # ---------------- Android ----------------
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 生成 android 工程
+        working-directory: mobile-app
+        run: |
+          flutter create --platforms=android --org com.zhigu --project-name zhigu_app .
+          rm -f test/widget_test.dart
+
+      - name: 补丁：关 release lint + 允许明文 HTTP
+        working-directory: mobile-app
+        run: python3 tool/ci_patch_android.py
+
+      - name: 拉依赖
+        working-directory: mobile-app
+        run: flutter pub get
+
+      - name: 静态检查
+        working-directory: mobile-app
+        run: flutter analyze --no-fatal-infos || true
+
+      # 按 ABI 拆包: 只保留真机用得上的 arm64-v8a / armeabi-v7a，
+      # 不打 x86_64（那是模拟器用的，白占 18MB）
+      - name: 打包 APK(按架构拆分)
+        working-directory: mobile-app
+        run: |
+          flutter build apk --release \
+            --split-per-abi \
+            --target-platform android-arm64,android-arm \
+            --dart-define=API_BASE=${{ env.API_BASE }} \
+            --dart-define=WS_BASE=${{ env.WS_BASE }}
+          ls -lh build/app/outputs/flutter-apk/*.apk
+
+      - name: 用正式证书签名
+        env:
+          KEY_PEM_B64: ${{ secrets.ANDROID_KEY_PEM_B64 }}
+          CERT_PEM_B64: ${{ secrets.ANDROID_CERT_PEM_B64 }}
+          KS_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          if [ -z "$KEY_PEM_B64" ]; then
+            echo "::warning::没配置签名密钥，输出 debug 签名的 APK（只能自己装，不能上架）"
+            mkdir -p out
+            cp mobile-app/build/app/outputs/flutter-apk/app-*-release.apk out/
+            exit 0
+          fi
+          echo "$KEY_PEM_B64" | base64 -d > /tmp/key.pem
+          echo "$CERT_PEM_B64" | base64 -d > /tmp/cert.pem
+          openssl pkcs12 -export -in /tmp/cert.pem -inkey /tmp/key.pem -name zhigu \
+            -out /tmp/release.p12 -passout pass:"$KS_PASS"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          mkdir -p out
+          for f in mobile-app/build/app/outputs/flutter-apk/app-*-release.apk; do
+            [ -e "$f" ] || continue
+            base=$(basename "$f" .apk)
+            "$BT/apksigner" sign \
+              --ks /tmp/release.p12 --ks-key-alias zhigu \
+              --ks-pass pass:"$KS_PASS" --key-pass pass:"$KS_PASS" \
+              --out "out/$base-signed.apk" "$f"
+            echo "--- $base-signed.apk"
+            "$BT/apksigner" verify --print-certs "out/$base-signed.apk" | head -3
+          done
+          ls -lh out/
+          cp out/*.apk . 2>/dev/null || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zhigu-android-apk
+          path: out/*.apk
+          if-no-files-found: error
+
+  # ---------------- iOS ----------------
+  ios:
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 生成 ios 工程
+        working-directory: mobile-app
+        run: |
+          flutter create --platforms=ios --org com.zhigu --project-name zhigu_app .
+          rm -f test/widget_test.dart
+
+      - name: 允许明文 HTTP/WS (ATS)
+        working-directory: mobile-app
+        run: |
+          PLIST=ios/Runner/Info.plist
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" $PLIST 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" $PLIST 2>/dev/null || true
+
+      - name: 拉依赖
+        working-directory: mobile-app
+        run: flutter pub get
+
+      # Flutter 3.50 起 `flutter build ios --no-codesign` 也强制要求 Development Team，
+      # 所以先用它把配置/Pods 准备好（这一步必然失败，忽略），再用 xcodebuild 关掉签名直接编。
+      - name: 准备 iOS 工程（缺少开发团队会报错，忽略）
+        working-directory: mobile-app
+        run: |
+          flutter build ios --release --no-codesign \
+            --dart-define=API_BASE=${{ env.API_BASE }} \
+            --dart-define=WS_BASE=${{ env.WS_BASE }} || true
+
+      - name: 编未签名 device 包
+        working-directory: mobile-app
+        run: |
+          xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner \
+            -configuration Release -sdk iphoneos \
+            -derivedDataPath build/ios_unsigned \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" DEVELOPMENT_TEAM="" \
+            build | tail -30
+
+      - name: 打包成未签名 ipa
+        working-directory: mobile-app
+        run: |
+          APP=$(find build/ios_unsigned -name Runner.app -type d | head -1)
+          echo "app: $APP"
+          mkdir -p Payload && rm -rf Payload/*
+          cp -R "$APP" Payload/
+          zip -qry zhigu-unsigned.ipa Payload
+          ls -lh zhigu-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zhigu-ios-unsigned-ipa
+          path: mobile-app/zhigu-unsigned.ipa
+          if-no-files-found: error
